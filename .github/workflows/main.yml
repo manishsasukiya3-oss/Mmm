@@ -165,18 +165,7 @@ jobs:
 
 
       # ==========================================
-      # 7. CLEAN PROJECT
-      # ==========================================
-      - name: 🧹 Clean Project
-        shell: bash
-        run: |
-          set -e
-
-          ./gradlew clean --no-daemon
-
-
-      # ==========================================
-      # 8. CREATE ANDROID DEBUG KEYSTORE
+      # 7. CREATE DEBUG KEYSTORE
       # ==========================================
       - name: 🔐 Create Android Debug Keystore
         shell: bash
@@ -184,15 +173,17 @@ jobs:
           set -e
 
           echo "=========================================="
-          echo "Checking Android Debug Keystore"
+          echo "Creating Android Debug Keystore"
           echo "=========================================="
 
+          # ------------------------------------------
+          # Location 1: Standard Android location
+          # ------------------------------------------
           mkdir -p "$HOME/.android"
 
           if [ ! -f "$HOME/.android/debug.keystore" ]; then
 
-            echo "debug.keystore not found."
-            echo "Creating debug.keystore..."
+            echo "Creating standard Android debug.keystore..."
 
             keytool -genkeypair \
               -v \
@@ -205,21 +196,102 @@ jobs:
               -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
 
-            echo "debug.keystore created successfully."
-
           else
 
-            echo "debug.keystore already exists."
+            echo "Standard debug.keystore already exists."
 
           fi
 
+
+          # ------------------------------------------
+          # Location 2: Repository root
+          # This fixes the exact error shown in screenshot
+          # ------------------------------------------
+          if [ ! -f "$GITHUB_WORKSPACE/debug.keystore" ]; then
+
+            echo "Creating repository-root debug.keystore..."
+
+            keytool -genkeypair \
+              -v \
+              -keystore "$GITHUB_WORKSPACE/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+
+          else
+
+            echo "Repository-root debug.keystore already exists."
+
+          fi
+
+
           echo ""
-          echo "Keystore location:"
+          echo "=========================================="
+          echo "Checking keystores"
+          echo "=========================================="
+
+          echo "Standard:"
           ls -lh "$HOME/.android/debug.keystore"
+
+          echo ""
+          echo "Repository root:"
+          ls -lh "$GITHUB_WORKSPACE/debug.keystore"
 
 
       # ==========================================
-      # 9. BUILD DEBUG APK
+      # 8. VERIFY KEYSTORE
+      # ==========================================
+      - name: 🔎 Verify Debug Keystore
+        shell: bash
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "Verifying debug.keystore"
+          echo "=========================================="
+
+          if [ ! -f "$GITHUB_WORKSPACE/debug.keystore" ]; then
+            echo "ERROR: debug.keystore not found!"
+            exit 1
+          fi
+
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            echo "ERROR: Android debug.keystore not found!"
+            exit 1
+          fi
+
+          echo "Repository debug.keystore:"
+          keytool -list \
+            -keystore "$GITHUB_WORKSPACE/debug.keystore" \
+            -storepass android
+
+          echo ""
+          echo "Android debug.keystore:"
+          keytool -list \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android
+
+          echo ""
+          echo "Keystore verification successful."
+
+
+      # ==========================================
+      # 9. CLEAN PROJECT
+      # ==========================================
+      - name: 🧹 Clean Project
+        shell: bash
+        run: |
+          set -e
+
+          ./gradlew clean --no-daemon
+
+
+      # ==========================================
+      # 10. BUILD DEBUG APK
       # ==========================================
       - name: 🚀 Build Test Mitra Debug APK
         shell: bash
@@ -236,7 +308,7 @@ jobs:
 
 
       # ==========================================
-      # 10. FIND GENERATED APK
+      # 11. FIND GENERATED APK
       # ==========================================
       - name: 🔍 Find Generated APK
         shell: bash
@@ -252,7 +324,7 @@ jobs:
 
 
       # ==========================================
-      # 11. UPLOAD APK
+      # 12. UPLOAD APK
       # ==========================================
       - name: 📤 Upload Test Mitra APK
         uses: actions/upload-artifact@v4
