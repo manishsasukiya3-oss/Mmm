@@ -2,7 +2,10 @@ name: Auto Unzip and Build Test Mitra APK
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches:
+      - main
+      - master
+
   workflow_dispatch:
 
 jobs:
@@ -10,50 +13,206 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # ==========================================
+      # 1. CHECKOUT
+      # ==========================================
       - name: 📥 Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 📦 Check and Extract ZIP if exists
+
+      # ==========================================
+      # 2. FIND AND EXTRACT ZIP
+      # ==========================================
+      - name: 📦 Extract Test Mitra ZIP
+        shell: bash
         run: |
-          echo "Checking for ZIP files in repository..."
-          ZIP_FILE=$(find . -maxdepth 2 -name "*.zip" | head -n 1)
-          if [ -n "$ZIP_FILE" ]; then
-            echo "Found zip: $ZIP_FILE. Extracting..."
-            unzip -o "$ZIP_FILE" -d .
-            # If extracted into a nested folder, move files to root
-            if [ ! -f "build.gradle.kts" ] && [ ! -f "build.gradle" ]; then
-              NESTED_DIR=$(find . -maxdepth 2 -type d -name "*Test*" -o -type d -name "*mitra*" -o -type d -name "*app*" | head -n 1)
-              if [ -n "$NESTED_DIR" ] && [ -f "$NESTED_DIR/build.gradle.kts" ]; then
-                echo "Moving files from nested folder $NESTED_DIR to root..."
-                cp -r "$NESTED_DIR"/* .
-              fi
-            fi
-            echo "Extraction completed successfully!"
+          set -e
+
+          echo "=========================================="
+          echo "Searching for ZIP file..."
+          echo "=========================================="
+
+          ZIP_FILE=$(find . -type f -name "*.zip" \
+            -not -path "./.git/*" \
+            | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "No ZIP file found."
+            echo "Using repository files directly."
           else
-            echo "No zip file found, building directly from repository source code."
+            echo "ZIP found:"
+            echo "$ZIP_FILE"
+
+            mkdir -p extracted
+
+            echo "Extracting ZIP..."
+            unzip -o "$ZIP_FILE" -d extracted
+
+            echo "Extraction completed."
+
+            echo "Searching for Android project..."
+
+            PROJECT_DIR=$(find extracted \
+              -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+              -printf '%h\n' \
+              | head -n 1)
+
+            if [ -z "$PROJECT_DIR" ]; then
+              PROJECT_DIR=$(find extracted \
+                -type f \( -name "build.gradle" -o -name "build.gradle.kts" \) \
+                -printf '%h\n' \
+                | head -n 1)
+            fi
+
+            if [ -n "$PROJECT_DIR" ]; then
+              echo "Android project found at:"
+              echo "$PROJECT_DIR"
+
+              cp -a "$PROJECT_DIR"/. .
+
+            else
+              echo "Project appears to be at ZIP root."
+              cp -a extracted/. .
+            fi
           fi
 
+
+      # ==========================================
+      # 3. SHOW PROJECT STRUCTURE
+      # ==========================================
+      - name: 🔍 Check Android Project
+        shell: bash
+        run: |
+          echo "=========================================="
+          echo "Project files:"
+          echo "=========================================="
+
+          ls -la
+
+          echo ""
+          echo "Gradle files:"
+          find . -maxdepth 3 \
+            \( -name "build.gradle" \
+            -o -name "build.gradle.kts" \
+            -o -name "settings.gradle" \
+            -o -name "settings.gradle.kts" \
+            -o -name "gradle-wrapper.properties" \) \
+            -print
+
+
+      # ==========================================
+      # 4. SETUP JAVA 17
+      # ==========================================
       - name: ☕ Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
+          java-version: "17"
+          distribution: "temurin"
           cache: gradle
 
-      - name: 🔧 Setup Gradle Wrapper if missing
+
+      # ==========================================
+      # 5. FIX GRADLE WRAPPER TO 9.3.1
+      # ==========================================
+      - name: 🔧 Configure Gradle 9.3.1
+        shell: bash
         run: |
-          if [ ! -f "gradlew" ]; then
-            echo "Generating Gradle Wrapper..."
-            gradle wrapper --gradle-version 8.9
+          set -e
+
+          echo "=========================================="
+          echo "Configuring Gradle 9.3.1"
+          echo "=========================================="
+
+          if [ -f "gradle/wrapper/gradle-wrapper.properties" ]; then
+
+            echo "Existing Gradle wrapper found."
+
+            sed -i \
+              's#distributionUrl=.*#distributionUrl=https\\://services.gradle.org/distributions/gradle-9.3.1-bin.zip#' \
+              gradle/wrapper/gradle-wrapper.properties
+
+          else
+
+            echo "Gradle wrapper not found."
+
+            echo "Generating Gradle wrapper 9.3.1..."
+
+            gradle wrapper --gradle-version 9.3.1
+
           fi
+
           chmod +x gradlew
 
-      - name: 🚀 Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace --no-daemon
+          echo ""
+          echo "Gradle wrapper configuration:"
+          cat gradle/wrapper/gradle-wrapper.properties
 
-      - name: 📤 Upload Generated APK
+
+      # ==========================================
+      # 6. VERIFY GRADLE VERSION
+      # ==========================================
+      - name: 🧪 Verify Gradle
+        shell: bash
+        run: |
+          set -e
+
+          chmod +x gradlew
+
+          ./gradlew --version
+
+
+      # ==========================================
+      # 7. CLEAN PROJECT
+      # ==========================================
+      - name: 🧹 Clean Project
+        shell: bash
+        run: |
+          set -e
+
+          ./gradlew clean --no-daemon
+
+
+      # ==========================================
+      # 8. BUILD DEBUG APK
+      # ==========================================
+      - name: 🚀 Build Test Mitra Debug APK
+        shell: bash
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "Building TEST MITRA APK"
+          echo "=========================================="
+
+          ./gradlew assembleDebug \
+            --stacktrace \
+            --no-daemon
+
+
+      # ==========================================
+      # 9. FIND APK
+      # ==========================================
+      - name: 🔍 Find Generated APK
+        shell: bash
+        run: |
+          echo "=========================================="
+          echo "Searching for generated APK..."
+          echo "=========================================="
+
+          find . \
+            -type f \
+            -name "*.apk" \
+            -print
+
+
+      # ==========================================
+      # 10. UPLOAD APK
+      # ==========================================
+      - name: 📤 Upload Test Mitra APK
         uses: actions/upload-artifact@v4
         with:
-          name: TestMitra-Latest-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: TEST-MITRA-Latest-APK
+          path: |
+            **/build/outputs/apk/debug/*.apk
           if-no-files-found: error
